@@ -1,0 +1,188 @@
+##########################################################################################
+#3. Balanced Sampling using Cube Method
+library(sampling)
+
+balance_sampling <- function(data, num_subcohort){
+  data_control <- data[data$delta==0,]
+  data_case <- data[data$delta==1,]
+  N <- nrow(data)
+  data_control$pik <- num_subcohort / (N - nrow(data_case))
+  data_case$pik <- 1
+  ifmodel <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = data)
+  inffun <- residuals(ifmodel, type = "dfbeta")
+  control_indices <- which(data$delta == 0)
+  filtered_inffun <- inffun[control_indices, ]
+  data_control <- cbind(data_control, filtered_inffun)
+  s <- samplecube(
+    pik = data_control$pik,
+    X = as.matrix(data_control[, c("1", "2", "3")]), comment = FALSE  # 보조 변수
+  )
+  
+  data_control$in.bs.subcohort <- s
+  selected_control <- data_control[data_control$in.bs.subcohort == 1, ]
+  final_sample <- rbind(selected_control[,c("X","delta","Z1","W1","W2")], data_case[,c("X","delta","Z1","W1","W2")])
+  
+  return(final_sample)
+}
+
+
+balance_sampling <- function(data, num_subcohort){
+  data_control <- data[data$delta==0,]
+  data_case <- data[data$delta==1,]
+  N <- nrow(data)
+  data_control$pik <- num_subcohort / (N - nrow(data_case))
+  data_case$pik <- 1
+  ifmodel <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = data)
+  inffun <- residuals(ifmodel, type = "dfbeta")
+  control_indices <- which(data$delta == 0)
+  filtered_inffun <- inffun[control_indices, ]
+  data_control <- cbind(data_control, filtered_inffun)
+  s <- samplecube(
+    pik = data_control$pik,
+    X = as.matrix(data_control[, c("1", "2", "3")]), comment = FALSE  # 보조 변수
+  )
+  
+  data_control$in.bs.subcohort <- s
+  selected_control <- data_control[data_control$in.bs.subcohort == 1, ]
+  final_sample <- rbind(selected_control[,c("X","delta","Z1","W1","W2")], data_case[,c("X","delta","Z1","W1","W2")])
+  
+  return(final_sample)
+}
+
+
+set.seed(2024)
+data <- generate_data_censor(30000, lambda_C_values[5])
+balance_cohort <- balance_sampling(data,100)
+balance_num_failures = sum(balance_cohort$delta == 1)
+balance_cohort_size = nrow(balance_cohort)
+cat("number of failues: ", balance_num_failures)
+cat("balance sample size:",nrow(balance_cohort))
+
+
+cube_method_function <- function(data, num_subcohort){
+  cube_sample <- balance_sampling(data, num_subcohort)
+  num_failures = sum(cube_sample$delta == 1)
+  n_c <- sum(data$delta == 0)  # 전체 비실패자 수
+  n_c_tilde <- sum(cube_sample$delta == 0 ) # 서브코호트 비실패자 수
+  num_failures <- sum(cube_sample$delta == 1)
+  weight <- ifelse(cube_sample$delta == 1, 1, n_c/n_c_tilde)
+  cox_fit <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = cube_sample, weights = weight)
+  
+  beta1_coeff <- cox_fit$coefficients[1]
+  beta2_coeff <- cox_fit$coefficients[2]
+  beta3_coeff <- cox_fit$coefficients[3]
+  return(list(
+    beta1_coeff = beta1_coeff,
+    beta2_coeff = beta2_coeff,
+    beta3_coeff = beta3_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(cube_sample)
+  ))}
+
+set.seed(2024)
+cube_one_result <- cube_method_function(data, 100)
+cat("number of failures:",cube_one_result$num_failures)
+cat("balance sample size:",cube_one_result$sample_size)
+cat("estimated beta1:",cube_one_result$beta1_coeff)
+cat("estimated beta2:",cube_one_result$beta2_coeff)
+cat("estimated beta3:",cube_one_result$beta3_coeff)
+
+
+
+#(iV)
+cube_repeat_function <- function(data_size, num_subcohort, num_iter){
+  estimated_beta1 <- numeric(num_iter)
+  estimated_beta2 <- numeric(num_iter)
+  estimated_beta3 <- numeric(num_iter)
+  num_failures <- numeric(num_iter)
+  sample_size <- numeric(num_iter)
+  for (i in 1:num_iter){
+    if (i%%200 == 0){
+      print(i)
+    }
+    set.seed(i)
+    data <- generate_data_censor(data_size, lambda_C_values[5])
+    cox_fit <- cube_method_function(data, num_subcohort)
+    estimated_beta1[i] <- cox_fit$beta1_coeff
+    estimated_beta2[i] <- cox_fit$beta2_coeff
+    estimated_beta3[i] <- cox_fit$beta3_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+    
+  }
+  results <- data.frame(
+    coeff_beta1 = estimated_beta1,
+    coeff_beta2 = estimated_beta2,
+    coeff_beta3 = estimated_beta3,
+    num_failures = num_failures,
+    sample_size = sample_size
+  )
+  return(results)
+}
+
+cube_result_500 <- cube_repeat_function(30000,100,500)
+cube_mean_500 <- colMeans(cube_result_500)
+cube_mean_500
+cube_sd_500 <- apply(cube_result_500, 2, sd)
+cube_sd_500
+
+#(v)
+true_values <- data.frame(
+  Parameter = c("mean of beta1", "mean of beta2", "mean of beta3"),
+  Value = c(log(2), log(2), -1)
+)
+true_values <- as.data.frame(t(true_values[,-1]))
+colnames(true_values) <- c("mean of beta1", "mean of beta2", "mean of beta3")
+true_values
+
+cube_compare_df <- rbind(true_values,cube_mean_500[1:3])
+cube_compare_df$Type <- c("true", "estimated")
+cube_compare_df
+
+
+b_1_sd <- data.frame(
+  Parameter = c("sd of beta1", "sd of beta2", "sd of beta3"),
+  Value = c(sd_beta1, sd_beta2, sd_beta3)
+)
+b_1_sd <- as.data.frame(t(b_1_sd[,-1]))
+colnames(b_1_sd) <- c("sd of beta1", "sd of beta2", "sd of beta3")
+cube_compare_sd_df <- rbind(b_1_sd,cube_sd_500[1:3])
+cube_compare_sd_df$Type <- c("1-(b)", "2-(a)")
+cube_compare_sd_df
+
+
+#(vii)
+
+#(ii)
+set.seed(2024)
+data <- generate_data_censor(30000, lambda_C_values[5])
+balance_cohort <- balance_sampling(data,300)
+balance_num_failures = sum(balance_cohort$delta == 1)
+balance_cohort_size = nrow(balance_cohort)
+cat("number of failues: ", balance_num_failures)
+cat("balance sample size:",nrow(balance_cohort))
+
+set.seed(2024)
+cube_result <- cube_method_function(data, 300)
+cat("number of failures:",cube_result$num_failures)
+cat("balance sample size:",cube_result$sample_size)
+cat("estimated beta1:",cube_result$beta1_coeff)
+cat("estimated beta2:",cube_result$beta2_coeff)
+cat("estimated beta3:",cube_result$beta3_coeff)
+
+
+set.seed(2024)
+cube_result_300_500 <- cube_repeat_function(30000,300,500)
+cube_mean_300_500 <- colMeans(cube_result_300_500)
+cube_mean_300_500
+cube_sd_300_500 <- apply(cube_result_300_500, 2, sd)
+cube_sd_300_500
+
+#(v)
+cube_compare_df_300 <- rbind(true_values, cube_mean_300_500[1:3])
+cube_compare_df_300$Type <- c("true", "balance sampling size: 300")
+cube_compare_df_300
+
+cube_compare_sd_df <- rbind(b_1_sd,cube_sd_300_500[1:3])
+cube_compare_sd_df$Type <- c("1-(b)", "balance sampling size: 300")
+cube_compare_sd_df
