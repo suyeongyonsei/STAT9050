@@ -1,0 +1,161 @@
+##########################################################################################
+#mimic data
+mimic <- read.csv("/Users/kimsuyeong/Dropbox/24-2/mimic3_final.csv")
+mimic_data <- mimic %>% select(-Glucose)
+
+covariates <- setdiff(colnames(mimic_data),c("futime","delta"))
+formula <- paste(covariates, collapse = " + ")
+cox_model <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), data = mimic_data)
+cox_model$coefficients
+
+general_balance_sampling <- function(data, num_subcohort, covariates){
+  data_control <- data[data$delta == 0, ]
+  data_case <- data[data$delta == 1, ]
+  N <- nrow(data)
+  data_control$pik <- num_subcohort / (N - nrow(data_case))  # 비실패자 샘플링 확률
+  data_case$pik <- 1 
+  formula <- paste(covariates, collapse = " + ")
+  ifmodel <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), data = data)
+  inffun <- residuals(ifmodel, type = "dfbeta")
+  control_indices <- which(data$delta == 0)
+  filtered_inffun <- inffun[control_indices, ]
+  data_control <- cbind(data_control, filtered_inffun)
+  covariate_matrix <- as.matrix(data_control[, covariates])
+  s <- samplecube(
+    pik = data_control$pik,
+    X = covariate_matrix, comment = FALSE
+  )
+  data_control$in.bs.subcohort <- s
+  selected_control <- data_control[data_control$in.bs.subcohort == 1, ]
+    final_sample <- rbind(
+    selected_control[, c("futime", "delta", covariates)],
+    data_case[, c("futime", "delta", covariates)]
+  )
+  
+  return(final_sample)
+}
+
+general_cube_method_function <- function(data, num_subcohort, covariates){
+  cube_sample <- general_balance_sampling(data, num_subcohort, covariates)
+  n_c <- sum(data$delta == 0)  
+  n_c_tilde <- sum(cube_sample$delta == 0)  
+  num_failures <- sum(cube_sample$delta == 1)
+  weight <- ifelse(cube_sample$delta == 1, 1, n_c / n_c_tilde)
+  formula <- paste(covariates, collapse = " + ")
+  cox_fit <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), 
+                   data = cube_sample, weights = weight)
+  beta_coeff <- cox_fit$coefficients
+  return(list(
+    beta_coeff = beta_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(cube_sample)
+  ))
+}
+
+general_cube_repeat_function <- function(data, num_subcohort, num_iter){
+  covariates <- setdiff(colnames(data),c("futime","delta"))
+  estimated_beta <- vector("list", num_iter)
+  num_failures <- numeric(num_iter)
+  sample_size <- numeric(num_iter)
+  for (i in 1:num_iter){
+    if (i%%200 == 0){
+      print(i)
+    }
+    set.seed(i)
+    cox_fit <- general_cube_method_function(data, num_subcohort, covariates)
+    estimated_beta[[i]] <- cox_fit$beta_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+    
+  }
+  beta_matrix <- do.call(rbind, estimated_beta)
+  colnames(beta_matrix) <- paste0("coeff_beta_", (covariates))  # 베타 열 이름 지정
+  
+  results <- data.frame(
+    beta_matrix,
+    num_failures = num_failures,
+    sample_size = sample_size
+  )
+  return(results)
+}
+
+
+##########################################################################################
+#general case-cohort
+
+#case_cohort_sampling
+general_case_cohort_function <- function(data, num_subcohort, covariates){
+  case_sample <- case_cohort_sampling(data, num_subcohort)
+  num_failures = sum(case_sample$delta == 1)
+  n_c <- sum(data$delta == 0)  # 전체 비실패자 수
+  n_c_tilde <- sum(case_sample$delta == 0 & case_sample$Subco_ind == 1) # 서브코호트 비실패자 수
+  weight <- ifelse(case_sample$delta == 1, 1, 
+                    ifelse(case_sample$Subco_ind == 1, n_c / n_c_tilde, 0))
+  formula <- paste(covariates, collapse = " + ")
+  cox_fit <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), 
+                   data = case_sample, weights = weight)
+
+  beta_coeff <- cox_fit$coefficients
+  return(list(
+    beta_coeff = beta_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(case_sample)
+  ))
+}
+
+general_case_repeat_function <- function(data, num_subcohort,num_iter){
+  covariates <- setdiff(colnames(data),c("futime","delta"))
+  estimated_beta <- vector("list", num_iter)
+  num_failures <- numeric(num_iter)
+  sample_size <- numeric(num_iter)
+  for (i in 1:num_iter){
+    set.seed(i)
+    cox_fit <- general_case_cohort_function(data, num_subcohort, covariates)
+    estimated_beta[[i]] <- cox_fit$beta_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+    
+  }
+  beta_matrix <- do.call(rbind, estimated_beta)
+  colnames(beta_matrix) <- paste0("coeff_beta_", (covariates))  # 베타 열 이름 지정
+  
+  results <- data.frame(
+    beta_matrix,
+    num_failures = num_failures,
+    sample_size = sample_size
+  )
+  return(results)
+}
+
+##########################################################################################
+set.seed(200)
+case_mimic_100 <- general_case_cohort_function(mimic_data, 100, covariates)
+cube_mimic_100 <- general_cube_method_function(mimic_data, 100, covariates)
+
+case_mimic_300 <- general_case_cohort_function(mimic_data, 300, covariates)
+cube_mimic_300 <- general_cube_method_function(mimic_data, 300, covariates)
+
+case_mimic_500 <- general_case_cohort_function(mimic_data, 500, covariates)
+cube_mimic_500 <- general_cube_method_function(mimic_data, 500, covariates)
+
+case_mimic_1000 <- general_case_cohort_function(mimic_data, 1000, covariates)
+cube_mimic_1000 <- general_cube_method_function(mimic_data, 1000, covariates)
+
+cox_fit <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), 
+                 data = mimic_data)
+beta_coeff <- cox_fit$coefficients
+
+case_abs_err_100 <- sum((case_mimic_100$beta_coeff-beta_coeff)^2)
+cube_abs_err_100 <- sum((cube_mimic_100$beta_coeff-beta_coeff)^2)
+
+case_abs_err_300 <- sum((case_mimic_300$beta_coeff-beta_coeff)^2)
+cube_abs_err_300 <- sum((cube_mimic_300$beta_coeff-beta_coeff)^2)
+
+case_abs_err_500 <- sum((case_mimic_500$beta_coeff-beta_coeff)^2)
+cube_abs_err_500 <- sum((cube_mimic_500$beta_coeff-beta_coeff)^2)
+
+case_abs_err_1000 <- sum((case_mimic_1000$beta_coeff-beta_coeff)^2)
+cube_abs_err_1000 <- sum((cube_mimic_1000$beta_coeff-beta_coeff)^2)
+
+cat("case-cohort sampling absolute error",case_abs_err)
+cat("cube method absolute error",cube_abs_err)
