@@ -1,0 +1,1032 @@
+##########################################################################################
+#Problem-1 
+
+set.seed(2024)  # 재현성을 위한 시드 설정
+#(1)
+generate_data <- function(n) {
+  Sigma <- matrix(c(1,0.75,0.75,1),nrow=2)
+  Z <- mvrnorm(n, mu = c(0, 0), Sigma = Sigma)
+  Z1 <- Z[, 1]
+  Z2 <- Z[, 2]
+  W1 <- rnorm(n, mean = 0, sd = 1)
+  W2 <- rbinom(n, size = 1, prob = 0.5)
+  u <- runif(n)
+  beta1 <- log(2)
+  beta2 <- log(2)
+  beta3 <- -1
+  rho <- 0.5
+  gamma <- 1.5
+  T <- ((-log(1 - u) / (exp(beta1 * Z1 + beta2 * W1 + beta3 * W2) * rho))^(1 / gamma))
+  data <- data.frame(T=T, Z1 = Z1, Z2 = Z2, W1 = W1, W2 = W2)
+  return(data)
+}
+
+#(5)
+set.seed(2024)
+data <- generate_data(30000)
+cox_model <- coxph(Surv(T) ~ Z1 + W1 + W2, data = data)
+summary(cox_model)
+
+#(b)
+estimated_beta1 <- numeric(100)
+estimated_beta2 <- numeric(100)
+estimated_beta3 <- numeric(100)
+se_beta1 <- numeric(100)
+se_beta2 <- numeric(100)
+se_beta3 <- numeric(100)
+
+ # 재현성을 위해 시드를 한 번만 설정
+for (i in 1:100) {
+  # 이 반복문 내에서 매번 다른 난수가 생성됨
+  set.seed(i)
+  data <- generate_data(30000)
+  cox_model <- coxph(Surv(T) ~ Z1 + W1 + W2, data = data)
+  summary_model <- summary(cox_model)
+  estimated_beta1[i] <- summary_model$coefficients[1, 1]  
+  estimated_beta2[i] <- summary_model$coefficients[2, 1] 
+  estimated_beta3[i] <- summary_model$coefficients[3, 1]  
+  
+  se_beta1[i] <- summary_model$coefficients[1, 3]  
+  se_beta2[i] <- summary_model$coefficients[2, 3]  
+  se_beta3[i] <- summary_model$coefficients[3, 3]  
+  }
+
+mean_beta1 <- mean(estimated_beta1)
+mean_beta2 <- mean(estimated_beta2)
+mean_beta3 <- mean(estimated_beta3)
+
+# 각 베타값의 표준 편차 계산
+sd_beta1 <- sd(estimated_beta1)
+sd_beta2 <- sd(estimated_beta2)
+sd_beta3 <- sd(estimated_beta3)
+
+# 표준 오차의 평균 계산
+mean_se_beta1 <- mean(se_beta1)
+mean_se_beta2 <- mean(se_beta2)
+mean_se_beta3 <- mean(se_beta3)
+
+# 결과 출력
+cat("Sample mean of β1 estimates: ", mean_beta1, "\n")
+cat("Sample mean of β2 estimates: ", mean_beta2, "\n")
+cat("Sample mean of β3 estimates: ", mean_beta3, "\n\n")
+
+cat("Sample standard deviation of β1 estimates: ", sd_beta1, "\n")
+cat("Sample standard deviation of β2 estimates: ", sd_beta2, "\n")
+cat("Sample standard deviation of β3 estimates: ", sd_beta3, "\n\n")
+
+cat("Sample mean of standard errors for β1: ", mean_se_beta1, "\n")
+cat("Sample mean of standard errors for β2: ", mean_se_beta2, "\n")
+cat("Sample mean of standard errors for β3: ", mean_se_beta3, "\n")
+
+
+
+#(c)
+
+set.seed(2024)
+find_censoring_rate <- function(target_rate) {
+  censor_rate = optimize(function(lambda_C) {
+    n_large = 1000000
+    C_large <- rexp(n_large, rate = lambda_C)
+    T_large <- generate_data(n_large)$T  # 사건 발생 시간 생성
+    censoring_rate <- mean(T_large > C_large)
+    abs(censoring_rate - target_rate)
+  }, interval = c(0.001, 30))$minimum
+  
+  return(censor_rate)
+}
+
+target_rates = c(0.10, 0.30, 0.90, 0.95, 0.99)
+(lambda_C_values = sapply(target_rates, find_censoring_rate))
+
+
+##########################################################################################
+#(d)
+set.seed(2024)
+generate_data_censor <- function(num, lambda_c){
+  data <- generate_data(num)
+  C <- rexp(num, rate = lambda_c)
+  X <- pmin(data$T,C)
+  delta <- ifelse(data$T<=C,1,0)
+  censoring_rate <- mean(delta == 0)
+  data <- data.frame(X = X, delta = delta, Z1 = data$Z1, W1 = data$W1, W2 = data$W2)
+  return(data)
+}
+
+
+repeat_function <- function(lambda_c){
+  estimated_beta1 <- numeric(100)
+  estimated_beta2 <- numeric(100)
+  estimated_beta3 <- numeric(100)
+  se_beta1 <- numeric(100)
+  se_beta2 <- numeric(100)
+  se_beta3 <- numeric(100)
+  for (i in 1:100){
+    set.seed(i)
+    data <- generate_data_censor(30000, lambda_c)
+    cox_model <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = data)
+    summary_model <- summary(cox_model)
+    
+    estimated_beta1[i] <- summary_model$coefficients[1, 1]
+    estimated_beta2[i] <- summary_model$coefficients[2, 1]
+    estimated_beta3[i] <- summary_model$coefficients[3, 1]
+    se_beta1[i] <- summary_model$coefficients[1, 3]
+    se_beta2[i] <- summary_model$coefficients[2, 3]
+    se_beta3[i] <- summary_model$coefficients[3, 3]
+  }
+  results <- data.frame(
+    beta1 = estimated_beta1,
+    beta2 = estimated_beta2,
+    beta3 = estimated_beta3,
+    se_beta1 = se_beta1,
+    se_beta2 = se_beta2,
+    se_beta3 = se_beta3)
+  return(results)
+  }
+
+mean_values_10 <- (repeat_function(lambda_C_values[1]))
+mean_values_30 <- (repeat_function(lambda_C_values[2]))
+mean_values_90 <- (repeat_function(lambda_C_values[3]))
+mean_values_95 <- (repeat_function(lambda_C_values[4]))
+mean_values_99 <- (repeat_function(lambda_C_values[5]))
+
+
+df_list <- list(mean_values_10, mean_values_30, mean_values_90, mean_values_95, mean_values_99) 
+summary_list <- lapply(df_list, function(df) {
+  mean_values <- colMeans(df)
+  sd_values <- sapply(df[, c("beta1", "beta2", "beta3")], sd)
+  c(mean_values, sd_beta1 = sd_values["beta1"], sd_beta2 = sd_values["beta2"], sd_beta3 = sd_values["beta3"])
+})
+mean_results <- do.call(rbind, summary_list)
+final_results <- cbind(`censoring rate` = c(10, 30, 90, 95, 99), mean_results)
+colnames(final_results) <- c("censoring rate",'mean_bata1','mean_beta2','mean_beta3',
+                             'se_beta1','se_beta2','se_beta3','sd_beta1','sd_beta2','sd_beta3')
+print(final_results)
+
+##########################################################################################
+#Problem-2 (a)
+#(i)
+case_cohort_sampling <- function(data, num_subcohort){
+  ones <- rep(1, num_subcohort)  
+  zeros <- rep(0, nrow(data)-num_subcohort)   
+  Subco_ind <- sample(c(ones, zeros), size = length(c(ones, zeros)), replace = FALSE)
+  data_sub <- data.frame(data, Subco_ind)
+  sub_cohort <- data_sub[data_sub$Subco_ind==1,]
+  case_sample <- data_sub[data_sub$Subco_ind==0&data_sub$delta==1,]
+  case_cohort <- data.frame(rbind(case_sample, sub_cohort))
+  return(case_cohort)
+}
+
+
+
+#(ii)
+set.seed(2024)
+data <- generate_data_censor(30000, lambda_C_values[5])
+case_cohort <- case_cohort_sampling(data,100)
+num_failures = sum(case_cohort$delta == 1)
+case_cohort_size = nrow(case_cohort)
+cat("number of failues: ", num_failures)
+cat("case-cohort sample size:",nrow(case_cohort))
+
+
+
+#(iii)
+case_cohort_function <- function(data, num_subcohort){
+  case_cohort <- case_cohort_sampling(data, num_subcohort)
+  num_failures = sum(case_cohort$delta == 1)
+  n_c <- sum(data$delta == 0)  # 전체 비실패자 수
+  n_c_tilde <- sum(case_cohort$delta == 0 & case_cohort$Subco_ind == 1) # 서브코호트 비실패자 수
+  weights <- ifelse(case_cohort$delta == 1, 1, 
+                    ifelse(case_cohort$Subco_ind == 1, n_c / n_c_tilde, 0))
+  cox_fit <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = case_cohort, weights = weights)
+  
+  beta1_coeff <- cox_fit$coefficients[1]
+  beta2_coeff <- cox_fit$coefficients[2]
+  beta3_coeff <- cox_fit$coefficients[3]
+  return(list(
+    beta1_coeff = beta1_coeff,
+    beta2_coeff = beta2_coeff,
+    beta3_coeff = beta3_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(case_cohort)
+  ))
+}
+
+set.seed(2024)
+case_one_result <- case_cohort_function(data,100)
+cat("number of failures:",case_one_result$num_failures)
+cat("case-cohort sample size:",case_one_result$sample_size)
+cat("estimated beta1:",case_one_result$beta1_coeff)
+cat("estimated beta2:",case_one_result$beta2_coeff)
+cat("estimated beta3:",case_one_result$beta3_coeff)
+
+
+#(iV)
+case_repeat_function <- function(data_size, num_subcohort,num){
+  estimated_beta1 <- numeric(num)
+  estimated_beta2 <- numeric(num)
+  estimated_beta3 <- numeric(num)
+  num_failures <- numeric(num)
+  sample_size <- numeric(num)
+  for (i in 1:num){
+    set.seed(i)
+    data <- generate_data_censor(data_size, lambda_C_values[5])
+    cox_fit <- case_cohort_function(data, num_subcohort)
+    estimated_beta1[i] <- cox_fit$beta1_coeff
+    estimated_beta2[i] <- cox_fit$beta2_coeff
+    estimated_beta3[i] <- cox_fit$beta3_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+
+  }
+  results <- data.frame(
+    coeff_beta1 = estimated_beta1,
+    coeff_beta2 = estimated_beta2,
+    coeff_beta3 = estimated_beta3,
+    num_failures = num_failures,
+    sample_size = sample_size
+)
+  return(results)
+}
+
+case_result_500 <- case_repeat_function(30000,100,500)
+case_mean_500 <- colMeans(case_result_500)
+case_mean_500
+case_sd_500 <- apply(case_result_500, 2, sd)
+case_sd_500
+
+#(v)
+true_values <- data.frame(
+  Parameter = c("mean of beta1", "mean of beta2", "mean of beta3"),
+  Value = c(log(2), log(2), -1)
+)
+true_values <- as.data.frame(t(true_values[,-1]))
+colnames(true_values) <- c("mean of beta1", "mean of beta2", "mean of beta3")
+true_values
+
+case_compare_df <- rbind(true_values,case_mean_500[1:3])
+case_compare_df$Type <- c("true", "estimated")
+case_compare_df
+
+
+b_1_sd <- data.frame(
+  Parameter = c("sd of beta1", "sd of beta2", "sd of beta3"),
+  Value = c(sd_beta1, sd_beta2, sd_beta3)
+)
+b_1_sd <- as.data.frame(t(b_1_sd[,-1]))
+colnames(b_1_sd) <- c("sd of beta1", "sd of beta2", "sd of beta3")
+case_compare_sd_df <- rbind(b_1_sd,case_sd_500[1:3])
+case_compare_sd_df$Type <- c("1-(b)", "2-(a)")
+case_compare_sd_df
+
+
+#(vii)
+
+#(ii)
+set.seed(2024)
+data <- generate_data_censor(30000, lambda_C_values[5])
+case_cohort <- case_cohort_sampling(data, 300)
+num_failures = sum(case_cohort$delta == 1)
+case_cohort_size = nrow(case_cohort)
+cat("number of failues: ", num_failures)
+cat("case-cohort sample size:",nrow(case_cohort))
+
+case_one_result_300 <- case_cohort_function(data, 300)
+cat("number of failures:",case_one_result_300$num_failures)
+cat("case-cohort sample size:",case_one_result_300$sample_size)
+cat("estimated beta1:",case_one_result_300$beta1_coeff)
+cat("estimated beta2:",case_one_result_300$beta2_coeff)
+cat("estimated beta3:",case_one_result_300$beta3_coeff)
+
+set.seed(2024)
+case_result_300_500 <- case_repeat_function(30000,300,500)
+case_mean_300_500 <- colMeans(case_result_300_500)
+case_mean_300_500
+case_sd_300_500 <- apply(case_result_300_500, 2, sd)
+case_sd_300_500
+
+#(v)
+case_compare_df_300 <- rbind(true_values,case_mean_300_500[1:3])
+case_compare_df_300$Type <- c("true", "size: 300")
+case_compare_df_300
+
+case_compare_sd_df <- rbind(b_1_sd,case_sd_300_500[1:3])
+case_compare_sd_df$Type <- c("1-(b)", "2-(a) size: 300")
+case_compare_sd_df
+
+#(b)
+nested_case_cohort_sampling <- function(data, n_controls) {
+  failures <- data[data$delta == 1, ]
+  nested_control <- list()
+  for (i in 1:nrow(failures)) {
+    risk_set <- data[data$X >= failures$X[i] & data$delta == 0, ]
+    if (nrow(risk_set) >= n_controls) {
+      controls <- risk_set[sample(nrow(risk_set), n_controls, replace = FALSE), ]
+    } else {
+      controls <- risk_set
+    }
+    nested_control[[i]] <- controls
+    
+  }
+  controls_df <- do.call(rbind,nested_control)
+  nested_case_control <- rbind(failures, controls_df)
+ return(nested_case_control)
+}
+
+
+nested_case_cohort_function <- function(data,nested_data){
+  n_c <- sum(data$delta == 0)
+  n_c_tilde <- sum(nested_data$delta == 0) 
+  num_failures = sum(nested_data$delta == 1)
+  weight <- ifelse(nested_data$delta == 1, 1, n_c / n_c_tilde)
+  
+  cox_fit <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = nested_data, weights = weight)
+  
+  beta1_coeff <- cox_fit$coefficients[1]
+  beta2_coeff <- cox_fit$coefficients[2]
+  beta3_coeff <- cox_fit$coefficients[3]
+  return(list(
+    beta1_coeff = beta1_coeff,
+    beta2_coeff = beta2_coeff,
+    beta3_coeff = beta3_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(nested_data)
+  ))
+}
+
+set.seed(2024)
+data = generate_data_censor(30000, lambda_C_values[5])
+nested_data <- nested_case_cohort_sampling(data,1)
+
+one_result <- nested_case_cohort_function(data, nested_data)
+cat("number of failures:",one_result$num_failures)
+cat("nested case-cohort sample size:",one_result$sample_size)
+cat("nested case-cohort estimated beta1:",one_result$beta1_coeff)
+cat("nested case-cohort estimated beta2:",one_result$beta2_coeff)
+cat("nested case-cohort estimated beta3:",one_result$beta3_coeff)
+
+
+nested_repeat_function <- function(num, n_controls){
+  estimated_beta1 <- numeric(num)
+  estimated_beta2 <- numeric(num)
+  estimated_beta3 <- numeric(num)
+  num_failures <- numeric(num)
+  sample_size <- numeric(num)
+  for (i in 1:num){
+    set.seed(i)
+    data <- generate_data_censor(30000, lambda_C_values[5])
+    nested_data <- nested_case_cohort_sampling(data, n_controls)
+    cox_fit <- nested_case_cohort_function(data, nested_data)
+    estimated_beta1[i] <- cox_fit$beta1_coeff
+    estimated_beta2[i] <- cox_fit$beta2_coeff
+    estimated_beta3[i] <- cox_fit$beta3_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+    
+  }
+  results <- data.frame(
+    coeff_beta1 = estimated_beta1,
+    coeff_beta2 = estimated_beta2,
+    coeff_beta3 = estimated_beta3,
+    num_failures = num_failures,
+    sample_size = sample_size
+  )
+  return(results)
+}
+
+set.seed(2024)
+nested_result_500 <- nested_repeat_function(500,1)
+nested_mean_500 <- colMeans(nested_result_500)
+nested_mean_500
+nested_sd_500 <- apply(nested_result_500, 2, sd)
+nested_sd_500
+
+#(v : compare)
+nested_compare_df <- rbind(true_values,nested_mean_500[1:3])
+nested_compare_df$Type <- c("true", "nested_estimated")
+nested_compare_df
+
+nested_compare_sd_df <- rbind(b_1_sd,nested_sd_500[1:3])
+nested_compare_sd_df$Type <- c("1-(b)", "2-(b)")
+nested_compare_sd_df
+
+#n_controls=5
+set.seed(2024)
+data = generate_data_censor(30000, lambda_C_values[5])
+nested_5_data <- nested_case_cohort_sampling(data,5)
+
+one_result <- nested_case_cohort_function(data, nested_5_data)
+cat("number of failures:",one_result$num_failures)
+cat("nested case-cohort sample size:",one_result$sample_size)
+cat("nested case-cohort estimated beta1:",one_result$beta1_coeff)
+cat("nested case-cohort estimated beta2:",one_result$beta2_coeff)
+cat("nested case-cohort estimated beta3:",one_result$beta3_coeff)
+
+set.seed(2024)
+nested_result_500_5 <- nested_repeat_function(500,5)
+nested_mean_500_5 <- colMeans(nested_result_500_5)
+nested_mean_500_5
+nested_sd_500_5 <- apply(nested_result_500_5, 2, sd)
+nested_sd_500_5
+
+#(v : compare)
+nested_compare_5_df <- rbind(true_values,nested_mean_500_5[1:3])
+nested_compare_5_df$Type <- c("true", "nested_estimated with 5")
+nested_compare_5_df
+
+nested_compare_sd_5_df <- rbind(b_1_sd,nested_sd_500_5[1:3])
+nested_compare_sd_5_df$Type <- c("1-(b)", "2-(b) with 5")
+nested_compare_sd_5_df
+
+
+##########################################################################################
+#3. Balanced Sampling using Cube Method
+library(sampling)
+
+balance_sampling <- function(data, num_subcohort){
+  data_control <- data[data$delta==0,]
+  data_case <- data[data$delta==1,]
+  N <- nrow(data)
+  data_control$pik <- num_subcohort / (N - nrow(data_case))
+  data_case$pik <- 1
+  ifmodel <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = data)
+  inffun <- residuals(ifmodel, type = "dfbeta")
+  control_indices <- which(data$delta == 0)
+  filtered_inffun <- inffun[control_indices, ]
+  data_control <- cbind(data_control, filtered_inffun)
+  s <- samplecube(
+    pik = data_control$pik,
+    X = as.matrix(data_control[, c("1", "2", "3")]), comment = FALSE  # 보조 변수
+  )
+  
+  data_control$in.bs.subcohort <- s
+  selected_control <- data_control[data_control$in.bs.subcohort == 1, ]
+  final_sample <- rbind(selected_control[,c("X","delta","Z1","W1","W2")], data_case[,c("X","delta","Z1","W1","W2")])
+  
+  return(final_sample)
+}
+
+
+balance_sampling <- function(data, num_subcohort){
+  data_control <- data[data$delta==0,]
+  data_case <- data[data$delta==1,]
+  N <- nrow(data)
+  data_control$pik <- num_subcohort / (N - nrow(data_case))
+  data_case$pik <- 1
+  ifmodel <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = data)
+  inffun <- residuals(ifmodel, type = "dfbeta")
+  control_indices <- which(data$delta == 0)
+  filtered_inffun <- inffun[control_indices, ]
+  data_control <- cbind(data_control, filtered_inffun)
+  s <- samplecube(
+    pik = data_control$pik,
+    X = as.matrix(data_control[, c("1", "2", "3")]), comment = FALSE  # 보조 변수
+  )
+  
+  data_control$in.bs.subcohort <- s
+  selected_control <- data_control[data_control$in.bs.subcohort == 1, ]
+  final_sample <- rbind(selected_control[,c("X","delta","Z1","W1","W2")], data_case[,c("X","delta","Z1","W1","W2")])
+  
+  return(final_sample)
+}
+
+
+set.seed(2024)
+data <- generate_data_censor(30000, lambda_C_values[5])
+balance_cohort <- balance_sampling(data,100)
+balance_num_failures = sum(balance_cohort$delta == 1)
+balance_cohort_size = nrow(balance_cohort)
+cat("number of failues: ", balance_num_failures)
+cat("balance sample size:",nrow(balance_cohort))
+
+
+cube_method_function <- function(data, num_subcohort){
+  cube_sample <- balance_sampling(data, num_subcohort)
+  num_failures = sum(cube_sample$delta == 1)
+  n_c <- sum(data$delta == 0)  # 전체 비실패자 수
+  n_c_tilde <- sum(cube_sample$delta == 0 ) # 서브코호트 비실패자 수
+  num_failures <- sum(cube_sample$delta == 1)
+  weight <- ifelse(cube_sample$delta == 1, 1, n_c/n_c_tilde)
+  cox_fit <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = cube_sample, weights = weight)
+  
+  beta1_coeff <- cox_fit$coefficients[1]
+  beta2_coeff <- cox_fit$coefficients[2]
+  beta3_coeff <- cox_fit$coefficients[3]
+  return(list(
+    beta1_coeff = beta1_coeff,
+    beta2_coeff = beta2_coeff,
+    beta3_coeff = beta3_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(cube_sample)
+  ))}
+
+set.seed(2024)
+cube_one_result <- cube_method_function(data, 100)
+cat("number of failures:",cube_one_result$num_failures)
+cat("balance sample size:",cube_one_result$sample_size)
+cat("estimated beta1:",cube_one_result$beta1_coeff)
+cat("estimated beta2:",cube_one_result$beta2_coeff)
+cat("estimated beta3:",cube_one_result$beta3_coeff)
+
+
+
+#(iV)
+cube_repeat_function <- function(data_size, num_subcohort, num_iter){
+  estimated_beta1 <- numeric(num_iter)
+  estimated_beta2 <- numeric(num_iter)
+  estimated_beta3 <- numeric(num_iter)
+  num_failures <- numeric(num_iter)
+  sample_size <- numeric(num_iter)
+  for (i in 1:num_iter){
+    if (i%%200 == 0){
+      print(i)
+    }
+    set.seed(i)
+    data <- generate_data_censor(data_size, lambda_C_values[5])
+    cox_fit <- cube_method_function(data, num_subcohort)
+    estimated_beta1[i] <- cox_fit$beta1_coeff
+    estimated_beta2[i] <- cox_fit$beta2_coeff
+    estimated_beta3[i] <- cox_fit$beta3_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+    
+  }
+  results <- data.frame(
+    coeff_beta1 = estimated_beta1,
+    coeff_beta2 = estimated_beta2,
+    coeff_beta3 = estimated_beta3,
+    num_failures = num_failures,
+    sample_size = sample_size
+  )
+  return(results)
+}
+
+cube_result_500 <- cube_repeat_function(30000,100,500)
+cube_mean_500 <- colMeans(cube_result_500)
+cube_mean_500
+cube_sd_500 <- apply(cube_result_500, 2, sd)
+cube_sd_500
+
+#(v)
+true_values <- data.frame(
+  Parameter = c("mean of beta1", "mean of beta2", "mean of beta3"),
+  Value = c(log(2), log(2), -1)
+)
+true_values <- as.data.frame(t(true_values[,-1]))
+colnames(true_values) <- c("mean of beta1", "mean of beta2", "mean of beta3")
+true_values
+
+cube_compare_df <- rbind(true_values,cube_mean_500[1:3])
+cube_compare_df$Type <- c("true", "estimated")
+cube_compare_df
+
+
+b_1_sd <- data.frame(
+  Parameter = c("sd of beta1", "sd of beta2", "sd of beta3"),
+  Value = c(sd_beta1, sd_beta2, sd_beta3)
+)
+b_1_sd <- as.data.frame(t(b_1_sd[,-1]))
+colnames(b_1_sd) <- c("sd of beta1", "sd of beta2", "sd of beta3")
+cube_compare_sd_df <- rbind(b_1_sd,cube_sd_500[1:3])
+cube_compare_sd_df$Type <- c("1-(b)", "2-(a)")
+cube_compare_sd_df
+
+
+#(vii)
+
+#(ii)
+set.seed(2024)
+data <- generate_data_censor(30000, lambda_C_values[5])
+balance_cohort <- balance_sampling(data,300)
+balance_num_failures = sum(balance_cohort$delta == 1)
+balance_cohort_size = nrow(balance_cohort)
+cat("number of failues: ", balance_num_failures)
+cat("balance sample size:",nrow(balance_cohort))
+
+set.seed(2024)
+cube_result <- cube_method_function(data, 300)
+cat("number of failures:",cube_result$num_failures)
+cat("balance sample size:",cube_result$sample_size)
+cat("estimated beta1:",cube_result$beta1_coeff)
+cat("estimated beta2:",cube_result$beta2_coeff)
+cat("estimated beta3:",cube_result$beta3_coeff)
+
+
+set.seed(2024)
+cube_result_300_500 <- cube_repeat_function(30000,300,500)
+cube_mean_300_500 <- colMeans(cube_result_300_500)
+cube_mean_300_500
+cube_sd_300_500 <- apply(cube_result_300_500, 2, sd)
+cube_sd_300_500
+
+#(v)
+cube_compare_df_300 <- rbind(true_values, cube_mean_300_500[1:3])
+cube_compare_df_300$Type <- c("true", "balance sampling size: 300")
+cube_compare_df_300
+
+cube_compare_sd_df <- rbind(b_1_sd,cube_sd_300_500[1:3])
+cube_compare_sd_df$Type <- c("1-(b)", "balance sampling size: 300")
+cube_compare_sd_df
+
+
+
+
+##########################################################################################
+#iteration = 3000
+
+case_result_3000_1000 <- case_repeat_function(30000,1000,3000)
+case_mean_3000_1000 <- colMeans(case_result_3000_1000)
+case_mean_3000_1000
+case_sd_3000_1000 <- apply(case_result_3000_1000, 2, sd)
+case_sd_3000_1000
+
+set.seed(2024)
+cube_result_3000_1000 <- cube_repeat_function(30000,1000,3000)
+cube_mean_3000_1000 <- colMeans(cube_result_3000_1000)
+cube_mean_3000_1000
+cube_sd_3000_1000 <- apply(cube_result_3000_1000, 2, sd)
+cube_sd_3000_1000
+
+
+case_result_3000_500 <- case_repeat_function(30000,500,3000)
+case_mean_3000_500 <- colMeans(case_result_3000_500)
+case_mean_3000_500
+case_sd_3000_500 <- apply(case_result_3000_500, 2, sd)
+case_sd_3000_500
+
+set.seed(2024)
+cube_result_3000_500 <- cube_repeat_function(30000,500,3000)
+cube_mean_3000_500 <- colMeans(cube_result_3000_500)
+cube_mean_3000_500
+cube_sd_3000_500 <- apply(cube_result_3000_500, 2, sd)
+cube_sd_3000_500
+
+
+case_result_3000_100 <- case_repeat_function(30000,100,3000)
+case_mean_3000_100 <- colMeans(case_result_3000_100)
+case_mean_3000_100
+case_sd_3000_100 <- apply(case_result_3000_100, 2, sd)
+case_sd_3000_100
+
+set.seed(2024)
+cube_result_3000_100 <- cube_repeat_function(30000,100,3000)
+cube_mean_3000_100 <- colMeans(cube_result_3000_100)
+cube_mean_3000_100
+cube_sd_3000_100 <- apply(cube_result_3000_100, 2, sd)
+cube_sd_3000_100
+
+
+case_result_3000_300 <- case_repeat_function(30000,300,3000)
+case_mean_3000_300 <- colMeans(case_result_3000_300)
+case_mean_3000_300
+case_sd_3000_300 <- apply(case_result_3000_300, 2, sd)
+case_sd_3000_300
+
+set.seed(2024)
+cube_result_3000_300 <- cube_repeat_function(30000,300,3000)
+cube_mean_3000_300 <- colMeans(cube_result_3000_300)
+cube_mean_3000_300
+cube_sd_3000_300 <- apply(cube_result_3000_300, 2, sd)
+cube_sd_3000_300
+
+result <- rbind(cbind(case_sd_500_100, case_sd_1000_100, case_sd_2000_100, case_sd_3000_100),
+      cbind(case_sd_500_300, case_sd_1000_300, case_sd_2000_300, case_sd_3000_300),
+      cbind(case_sd_500_500, case_sd_1000_500, case_sd_2000_500, case_sd_3000_500),
+      cbind(case_sd_500_1000, case_sd_1000_1000, case_sd_2000_1000, case_sd_3000_1000))
+write.xlsx(result, "C:/Users/suyeong/Dropbox/24-2/case_sd.xlsx")
+ 
+##########################################################################################
+#iteration = 1000
+
+case_result_1000_1000 <- case_repeat_function(30000,1000,1000)
+case_mean_1000_1000 <- colMeans(case_result_1000_1000)
+case_mean_1000_1000
+case_sd_1000_1000 <- apply(case_result_1000_1000, 2, sd)
+case_sd_1000_1000
+
+set.seed(2024)
+cube_result_1000_1000 <- cube_repeat_function(30000,1000,1000)
+cube_mean_1000_1000 <- colMeans(cube_result_1000_1000)
+cube_mean_1000_1000
+cube_sd_1000_1000 <- apply(cube_result_1000_1000, 2, sd)
+cube_sd_1000_1000
+
+
+case_result_1000_500 <- case_repeat_function(30000,500,1000)
+case_mean_1000_500 <- colMeans(case_result_1000_500)
+case_mean_1000_500
+case_sd_1000_500 <- apply(case_result_1000_500, 2, sd)
+case_sd_1000_500
+
+set.seed(2024)
+cube_result_1000_500 <- cube_repeat_function(30000,500,1000)
+cube_mean_1000_500 <- colMeans(cube_result_1000_500)
+cube_mean_1000_500
+cube_sd_1000_500 <- apply(cube_result_1000_500, 2, sd)
+cube_sd_1000_500
+
+
+case_result_1000_100 <- case_repeat_function(30000,100,1000)
+case_mean_1000_100 <- colMeans(case_result_1000_100)
+case_mean_1000_100
+case_sd_1000_100 <- apply(case_result_1000_100, 2, sd)
+case_sd_1000_100
+
+set.seed(2024)
+cube_result_1000_100 <- cube_repeat_function(30000,100,1000)
+cube_mean_1000_100 <- colMeans(cube_result_1000_100)
+cube_mean_1000_100
+cube_sd_1000_100 <- apply(cube_result_1000_100, 2, sd)
+cube_sd_1000_100
+
+
+case_result_1000_300 <- case_repeat_function(30000,300,1000)
+case_mean_1000_300 <- colMeans(case_result_1000_300)
+case_mean_1000_300
+case_sd_1000_300 <- apply(case_result_1000_300, 2, sd)
+case_sd_1000_300
+
+set.seed(2024)
+cube_result_1000_300 <- cube_repeat_function(30000,300,1000)
+cube_mean_1000_300 <- colMeans(cube_result_1000_300)
+cube_mean_1000_300
+cube_sd_1000_300 <- apply(cube_result_1000_300, 2, sd)
+cube_sd_1000_300
+
+##########################################################################################
+#iteration = 2000
+
+case_result_2000_1000 <- case_repeat_function(30000,1000,2000)
+case_mean_2000_1000 <- colMeans(case_result_2000_1000)
+case_mean_2000_1000
+case_sd_2000_1000 <- apply(case_result_2000_1000, 2, sd)
+case_sd_2000_1000
+
+set.seed(2024)
+cube_result_2000_1000 <- cube_repeat_function(30000,1000,2000)
+cube_mean_2000_1000 <- colMeans(cube_result_2000_1000)
+cube_mean_2000_1000
+cube_sd_2000_1000 <- apply(cube_result_2000_1000, 2, sd)
+cube_sd_2000_1000
+
+
+case_result_2000_500 <- case_repeat_function(30000,500,2000)
+case_mean_2000_500 <- colMeans(case_result_2000_500)
+case_mean_2000_500
+case_sd_2000_500 <- apply(case_result_2000_500, 2, sd)
+case_sd_2000_500
+
+set.seed(2024)
+cube_result_2000_500 <- cube_repeat_function(30000,500,2000)
+cube_mean_2000_500 <- colMeans(cube_result_2000_500)
+cube_mean_2000_500
+cube_sd_2000_500 <- apply(cube_result_2000_500, 2, sd)
+cube_sd_2000_500
+
+
+case_result_2000_100 <- case_repeat_function(30000,100,2000)
+case_mean_2000_100 <- colMeans(case_result_2000_100)
+case_mean_2000_100
+case_sd_2000_100 <- apply(case_result_2000_100, 2, sd)
+case_sd_2000_100
+
+set.seed(2024)
+cube_result_2000_100 <- cube_repeat_function(30000,100,2000)
+cube_mean_2000_100 <- colMeans(cube_result_2000_100)
+cube_mean_2000_100
+cube_sd_2000_100 <- apply(cube_result_2000_100, 2, sd)
+cube_sd_2000_100
+
+
+case_result_2000_300 <- case_repeat_function(30000,300,2000)
+case_mean_2000_300 <- colMeans(case_result_2000_300)
+case_mean_2000_300
+case_sd_2000_300 <- apply(case_result_2000_300, 2, sd)
+case_sd_2000_300
+
+set.seed(2024)
+cube_result_2000_300 <- cube_repeat_function(30000,300,2000)
+cube_mean_2000_300 <- colMeans(cube_result_2000_300)
+cube_mean_2000_300
+cube_sd_2000_300 <- apply(cube_result_2000_300, 2, sd)
+cube_sd_2000_300
+
+
+##########################################################################################
+#iteration = 500
+
+case_result_500_1000 <- case_repeat_function(30000,1000,500)
+case_mean_500_1000 <- colMeans(case_result_500_1000)
+case_mean_500_1000
+case_sd_500_1000 <- apply(case_result_500_1000, 2, sd)
+case_sd_500_1000
+
+set.seed(2024)
+cube_result_500_1000 <- cube_repeat_function(30000,1000,500)
+cube_mean_500_1000 <- colMeans(cube_result_500_1000)
+cube_mean_500_1000
+cube_sd_500_1000 <- apply(cube_result_500_1000, 2, sd)
+cube_sd_500_1000
+
+
+case_result_500_500 <- case_repeat_function(30000,500,500)
+case_mean_500_500 <- colMeans(case_result_500_500)
+case_mean_500_500
+case_sd_500_500 <- apply(case_result_500_500, 2, sd)
+case_sd_500_500
+
+set.seed(2024)
+cube_result_500_500 <- cube_repeat_function(30000,500,500)
+cube_mean_500_500 <- colMeans(cube_result_500_500)
+cube_mean_500_500
+cube_sd_500_500 <- apply(cube_result_500_500, 2, sd)
+cube_sd_500_500
+
+
+case_result_500_100 <- case_repeat_function(30000,100,500)
+case_mean_500_100 <- colMeans(case_result_500_100)
+case_mean_500_100
+case_sd_500_100 <- apply(case_result_500_100, 2, sd)
+case_sd_500_100
+
+set.seed(2024)
+cube_result_500_100 <- cube_repeat_function(30000,100,500)
+cube_mean_500_100 <- colMeans(cube_result_500_100)
+cube_mean_500_100
+cube_sd_500_100 <- apply(cube_result_500_100, 2, sd)
+cube_sd_500_100
+
+
+case_result_500_300 <- case_repeat_function(30000,300,500)
+case_mean_500_300 <- colMeans(case_result_500_300)
+case_mean_500_300
+case_sd_500_300 <- apply(case_result_500_300, 2, sd)
+case_sd_500_300
+
+set.seed(2024)
+cube_result_500_300 <- cube_repeat_function(30000,300,500)
+cube_mean_500_300 <- colMeans(cube_result_500_300)
+cube_mean_500_300
+cube_sd_500_300 <- apply(cube_result_500_300, 2, sd)
+cube_sd_500_300
+
+##########################################################################################
+#mimic data
+mimic <- read.csv("/Users/kimsuyeong/Dropbox/24-2/mimic3_final.csv")
+mimic_data <- mimic %>% select(-Glucose)
+
+covariates <- setdiff(colnames(mimic_data),c("futime","delta"))
+formula <- paste(covariates, collapse = " + ")
+cox_model <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), data = mimic_data)
+cox_model$coefficients
+
+general_balance_sampling <- function(data, num_subcohort, covariates){
+  data_control <- data[data$delta == 0, ]
+  data_case <- data[data$delta == 1, ]
+  N <- nrow(data)
+  data_control$pik <- num_subcohort / (N - nrow(data_case))  # 비실패자 샘플링 확률
+  data_case$pik <- 1 
+  formula <- paste(covariates, collapse = " + ")
+  ifmodel <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), data = data)
+  inffun <- residuals(ifmodel, type = "dfbeta")
+  control_indices <- which(data$delta == 0)
+  filtered_inffun <- inffun[control_indices, ]
+  data_control <- cbind(data_control, filtered_inffun)
+  covariate_matrix <- as.matrix(data_control[, covariates])
+  s <- samplecube(
+    pik = data_control$pik,
+    X = covariate_matrix, comment = FALSE
+  )
+  data_control$in.bs.subcohort <- s
+  selected_control <- data_control[data_control$in.bs.subcohort == 1, ]
+    final_sample <- rbind(
+    selected_control[, c("futime", "delta", covariates)],
+    data_case[, c("futime", "delta", covariates)]
+  )
+  
+  return(final_sample)
+}
+
+general_cube_method_function <- function(data, num_subcohort, covariates){
+  cube_sample <- general_balance_sampling(data, num_subcohort, covariates)
+  n_c <- sum(data$delta == 0)  
+  n_c_tilde <- sum(cube_sample$delta == 0)  
+  num_failures <- sum(cube_sample$delta == 1)
+  weight <- ifelse(cube_sample$delta == 1, 1, n_c / n_c_tilde)
+  formula <- paste(covariates, collapse = " + ")
+  cox_fit <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), 
+                   data = cube_sample, weights = weight)
+  beta_coeff <- cox_fit$coefficients
+  return(list(
+    beta_coeff = beta_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(cube_sample)
+  ))
+}
+
+general_cube_repeat_function <- function(data, num_subcohort, num_iter){
+  covariates <- setdiff(colnames(data),c("futime","delta"))
+  estimated_beta <- vector("list", num_iter)
+  num_failures <- numeric(num_iter)
+  sample_size <- numeric(num_iter)
+  for (i in 1:num_iter){
+    if (i%%200 == 0){
+      print(i)
+    }
+    set.seed(i)
+    cox_fit <- general_cube_method_function(data, num_subcohort, covariates)
+    estimated_beta[[i]] <- cox_fit$beta_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+    
+  }
+  beta_matrix <- do.call(rbind, estimated_beta)
+  colnames(beta_matrix) <- paste0("coeff_beta_", (covariates))  # 베타 열 이름 지정
+  
+  results <- data.frame(
+    beta_matrix,
+    num_failures = num_failures,
+    sample_size = sample_size
+  )
+  return(results)
+}
+
+
+##########################################################################################
+#general case-cohort
+
+#case_cohort_sampling
+general_case_cohort_function <- function(data, num_subcohort, covariates){
+  case_sample <- case_cohort_sampling(data, num_subcohort)
+  num_failures = sum(case_sample$delta == 1)
+  n_c <- sum(data$delta == 0)  # 전체 비실패자 수
+  n_c_tilde <- sum(case_sample$delta == 0 & case_sample$Subco_ind == 1) # 서브코호트 비실패자 수
+  weight <- ifelse(case_sample$delta == 1, 1, 
+                    ifelse(case_sample$Subco_ind == 1, n_c / n_c_tilde, 0))
+  formula <- paste(covariates, collapse = " + ")
+  cox_fit <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), 
+                   data = case_sample, weights = weight)
+
+  beta_coeff <- cox_fit$coefficients
+  return(list(
+    beta_coeff = beta_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(case_sample)
+  ))
+}
+
+general_case_repeat_function <- function(data, num_subcohort,num_iter){
+  covariates <- setdiff(colnames(data),c("futime","delta"))
+  estimated_beta <- vector("list", num_iter)
+  num_failures <- numeric(num_iter)
+  sample_size <- numeric(num_iter)
+  for (i in 1:num_iter){
+    set.seed(i)
+    cox_fit <- general_case_cohort_function(data, num_subcohort, covariates)
+    estimated_beta[[i]] <- cox_fit$beta_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+    
+  }
+  beta_matrix <- do.call(rbind, estimated_beta)
+  colnames(beta_matrix) <- paste0("coeff_beta_", (covariates))  # 베타 열 이름 지정
+  
+  results <- data.frame(
+    beta_matrix,
+    num_failures = num_failures,
+    sample_size = sample_size
+  )
+  return(results)
+}
+
+##########################################################################################
+set.seed(200)
+case_mimic_100 <- general_case_cohort_function(mimic_data, 100, covariates)
+cube_mimic_100 <- general_cube_method_function(mimic_data, 100, covariates)
+
+case_mimic_300 <- general_case_cohort_function(mimic_data, 300, covariates)
+cube_mimic_300 <- general_cube_method_function(mimic_data, 300, covariates)
+
+case_mimic_500 <- general_case_cohort_function(mimic_data, 500, covariates)
+cube_mimic_500 <- general_cube_method_function(mimic_data, 500, covariates)
+
+case_mimic_1000 <- general_case_cohort_function(mimic_data, 1000, covariates)
+cube_mimic_1000 <- general_cube_method_function(mimic_data, 1000, covariates)
+
+cox_fit <- coxph(as.formula(paste("Surv(futime, delta) ~", formula)), 
+                 data = mimic_data)
+beta_coeff <- cox_fit$coefficients
+
+case_abs_err_100 <- sum((case_mimic_100$beta_coeff-beta_coeff)^2)
+cube_abs_err_100 <- sum((cube_mimic_100$beta_coeff-beta_coeff)^2)
+
+case_abs_err_300 <- sum((case_mimic_300$beta_coeff-beta_coeff)^2)
+cube_abs_err_300 <- sum((cube_mimic_300$beta_coeff-beta_coeff)^2)
+
+case_abs_err_500 <- sum((case_mimic_500$beta_coeff-beta_coeff)^2)
+cube_abs_err_500 <- sum((cube_mimic_500$beta_coeff-beta_coeff)^2)
+
+case_abs_err_1000 <- sum((case_mimic_1000$beta_coeff-beta_coeff)^2)
+cube_abs_err_1000 <- sum((cube_mimic_1000$beta_coeff-beta_coeff)^2)
+
+cat("case-cohort sampling absolute error",case_abs_err)
+cat("cube method absolute error",cube_abs_err)
