@@ -1,0 +1,274 @@
+##########################################################################################
+#Problem-2 (a)
+#(i)
+case_cohort_sampling <- function(data, num_subcohort){
+  ones <- rep(1, num_subcohort)  
+  zeros <- rep(0, nrow(data)-num_subcohort)   
+  Subco_ind <- sample(c(ones, zeros), size = length(c(ones, zeros)), replace = FALSE)
+  data_sub <- data.frame(data, Subco_ind)
+  sub_cohort <- data_sub[data_sub$Subco_ind==1,]
+  case_sample <- data_sub[data_sub$Subco_ind==0&data_sub$delta==1,]
+  case_cohort <- data.frame(rbind(case_sample, sub_cohort))
+  return(case_cohort)
+}
+
+
+
+#(ii)
+set.seed(2024)
+data <- generate_data_censor(30000, lambda_C_values[5])
+case_cohort <- case_cohort_sampling(data,100)
+num_failures = sum(case_cohort$delta == 1)
+case_cohort_size = nrow(case_cohort)
+cat("number of failues: ", num_failures)
+cat("case-cohort sample size:",nrow(case_cohort))
+
+
+
+#(iii)
+case_cohort_function <- function(data, num_subcohort){
+  case_cohort <- case_cohort_sampling(data, num_subcohort)
+  num_failures = sum(case_cohort$delta == 1)
+  n_c <- sum(data$delta == 0)  # 전체 비실패자 수
+  n_c_tilde <- sum(case_cohort$delta == 0 & case_cohort$Subco_ind == 1) # 서브코호트 비실패자 수
+  weights <- ifelse(case_cohort$delta == 1, 1, 
+                    ifelse(case_cohort$Subco_ind == 1, n_c / n_c_tilde, 0))
+  cox_fit <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = case_cohort, weights = weights)
+  
+  beta1_coeff <- cox_fit$coefficients[1]
+  beta2_coeff <- cox_fit$coefficients[2]
+  beta3_coeff <- cox_fit$coefficients[3]
+  return(list(
+    beta1_coeff = beta1_coeff,
+    beta2_coeff = beta2_coeff,
+    beta3_coeff = beta3_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(case_cohort)
+  ))
+}
+
+set.seed(2024)
+case_one_result <- case_cohort_function(data,100)
+cat("number of failures:",case_one_result$num_failures)
+cat("case-cohort sample size:",case_one_result$sample_size)
+cat("estimated beta1:",case_one_result$beta1_coeff)
+cat("estimated beta2:",case_one_result$beta2_coeff)
+cat("estimated beta3:",case_one_result$beta3_coeff)
+
+
+#(iV)
+case_repeat_function <- function(data_size, num_subcohort,num){
+  estimated_beta1 <- numeric(num)
+  estimated_beta2 <- numeric(num)
+  estimated_beta3 <- numeric(num)
+  num_failures <- numeric(num)
+  sample_size <- numeric(num)
+  for (i in 1:num){
+    set.seed(i)
+    data <- generate_data_censor(data_size, lambda_C_values[5])
+    cox_fit <- case_cohort_function(data, num_subcohort)
+    estimated_beta1[i] <- cox_fit$beta1_coeff
+    estimated_beta2[i] <- cox_fit$beta2_coeff
+    estimated_beta3[i] <- cox_fit$beta3_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+
+  }
+  results <- data.frame(
+    coeff_beta1 = estimated_beta1,
+    coeff_beta2 = estimated_beta2,
+    coeff_beta3 = estimated_beta3,
+    num_failures = num_failures,
+    sample_size = sample_size
+)
+  return(results)
+}
+
+case_result_500 <- case_repeat_function(30000,100,500)
+case_mean_500 <- colMeans(case_result_500)
+case_mean_500
+case_sd_500 <- apply(case_result_500, 2, sd)
+case_sd_500
+
+#(v)
+true_values <- data.frame(
+  Parameter = c("mean of beta1", "mean of beta2", "mean of beta3"),
+  Value = c(log(2), log(2), -1)
+)
+true_values <- as.data.frame(t(true_values[,-1]))
+colnames(true_values) <- c("mean of beta1", "mean of beta2", "mean of beta3")
+true_values
+
+case_compare_df <- rbind(true_values,case_mean_500[1:3])
+case_compare_df$Type <- c("true", "estimated")
+case_compare_df
+
+
+b_1_sd <- data.frame(
+  Parameter = c("sd of beta1", "sd of beta2", "sd of beta3"),
+  Value = c(sd_beta1, sd_beta2, sd_beta3)
+)
+b_1_sd <- as.data.frame(t(b_1_sd[,-1]))
+colnames(b_1_sd) <- c("sd of beta1", "sd of beta2", "sd of beta3")
+case_compare_sd_df <- rbind(b_1_sd,case_sd_500[1:3])
+case_compare_sd_df$Type <- c("1-(b)", "2-(a)")
+case_compare_sd_df
+
+
+#(vii)
+
+#(ii)
+set.seed(2024)
+data <- generate_data_censor(30000, lambda_C_values[5])
+case_cohort <- case_cohort_sampling(data, 300)
+num_failures = sum(case_cohort$delta == 1)
+case_cohort_size = nrow(case_cohort)
+cat("number of failues: ", num_failures)
+cat("case-cohort sample size:",nrow(case_cohort))
+
+case_one_result_300 <- case_cohort_function(data, 300)
+cat("number of failures:",case_one_result_300$num_failures)
+cat("case-cohort sample size:",case_one_result_300$sample_size)
+cat("estimated beta1:",case_one_result_300$beta1_coeff)
+cat("estimated beta2:",case_one_result_300$beta2_coeff)
+cat("estimated beta3:",case_one_result_300$beta3_coeff)
+
+set.seed(2024)
+case_result_300_500 <- case_repeat_function(30000,300,500)
+case_mean_300_500 <- colMeans(case_result_300_500)
+case_mean_300_500
+case_sd_300_500 <- apply(case_result_300_500, 2, sd)
+case_sd_300_500
+
+#(v)
+case_compare_df_300 <- rbind(true_values,case_mean_300_500[1:3])
+case_compare_df_300$Type <- c("true", "size: 300")
+case_compare_df_300
+
+case_compare_sd_df <- rbind(b_1_sd,case_sd_300_500[1:3])
+case_compare_sd_df$Type <- c("1-(b)", "2-(a) size: 300")
+case_compare_sd_df
+
+#(b)
+nested_case_cohort_sampling <- function(data, n_controls) {
+  failures <- data[data$delta == 1, ]
+  nested_control <- list()
+  for (i in 1:nrow(failures)) {
+    risk_set <- data[data$X >= failures$X[i] & data$delta == 0, ]
+    if (nrow(risk_set) >= n_controls) {
+      controls <- risk_set[sample(nrow(risk_set), n_controls, replace = FALSE), ]
+    } else {
+      controls <- risk_set
+    }
+    nested_control[[i]] <- controls
+    
+  }
+  controls_df <- do.call(rbind,nested_control)
+  nested_case_control <- rbind(failures, controls_df)
+ return(nested_case_control)
+}
+
+
+nested_case_cohort_function <- function(data,nested_data){
+  n_c <- sum(data$delta == 0)
+  n_c_tilde <- sum(nested_data$delta == 0) 
+  num_failures = sum(nested_data$delta == 1)
+  weight <- ifelse(nested_data$delta == 1, 1, n_c / n_c_tilde)
+  
+  cox_fit <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = nested_data, weights = weight)
+  
+  beta1_coeff <- cox_fit$coefficients[1]
+  beta2_coeff <- cox_fit$coefficients[2]
+  beta3_coeff <- cox_fit$coefficients[3]
+  return(list(
+    beta1_coeff = beta1_coeff,
+    beta2_coeff = beta2_coeff,
+    beta3_coeff = beta3_coeff,
+    num_failures = num_failures,
+    sample_size = nrow(nested_data)
+  ))
+}
+
+set.seed(2024)
+data = generate_data_censor(30000, lambda_C_values[5])
+nested_data <- nested_case_cohort_sampling(data,1)
+
+one_result <- nested_case_cohort_function(data, nested_data)
+cat("number of failures:",one_result$num_failures)
+cat("nested case-cohort sample size:",one_result$sample_size)
+cat("nested case-cohort estimated beta1:",one_result$beta1_coeff)
+cat("nested case-cohort estimated beta2:",one_result$beta2_coeff)
+cat("nested case-cohort estimated beta3:",one_result$beta3_coeff)
+
+
+nested_repeat_function <- function(num, n_controls){
+  estimated_beta1 <- numeric(num)
+  estimated_beta2 <- numeric(num)
+  estimated_beta3 <- numeric(num)
+  num_failures <- numeric(num)
+  sample_size <- numeric(num)
+  for (i in 1:num){
+    set.seed(i)
+    data <- generate_data_censor(30000, lambda_C_values[5])
+    nested_data <- nested_case_cohort_sampling(data, n_controls)
+    cox_fit <- nested_case_cohort_function(data, nested_data)
+    estimated_beta1[i] <- cox_fit$beta1_coeff
+    estimated_beta2[i] <- cox_fit$beta2_coeff
+    estimated_beta3[i] <- cox_fit$beta3_coeff
+    num_failures[i] <- cox_fit$num_failures
+    sample_size[i]<- cox_fit$sample_size
+    
+  }
+  results <- data.frame(
+    coeff_beta1 = estimated_beta1,
+    coeff_beta2 = estimated_beta2,
+    coeff_beta3 = estimated_beta3,
+    num_failures = num_failures,
+    sample_size = sample_size
+  )
+  return(results)
+}
+
+set.seed(2024)
+nested_result_500 <- nested_repeat_function(500,1)
+nested_mean_500 <- colMeans(nested_result_500)
+nested_mean_500
+nested_sd_500 <- apply(nested_result_500, 2, sd)
+nested_sd_500
+
+#(v : compare)
+nested_compare_df <- rbind(true_values,nested_mean_500[1:3])
+nested_compare_df$Type <- c("true", "nested_estimated")
+nested_compare_df
+
+nested_compare_sd_df <- rbind(b_1_sd,nested_sd_500[1:3])
+nested_compare_sd_df$Type <- c("1-(b)", "2-(b)")
+nested_compare_sd_df
+
+#n_controls=5
+set.seed(2024)
+data = generate_data_censor(30000, lambda_C_values[5])
+nested_5_data <- nested_case_cohort_sampling(data,5)
+
+one_result <- nested_case_cohort_function(data, nested_5_data)
+cat("number of failures:",one_result$num_failures)
+cat("nested case-cohort sample size:",one_result$sample_size)
+cat("nested case-cohort estimated beta1:",one_result$beta1_coeff)
+cat("nested case-cohort estimated beta2:",one_result$beta2_coeff)
+cat("nested case-cohort estimated beta3:",one_result$beta3_coeff)
+
+set.seed(2024)
+nested_result_500_5 <- nested_repeat_function(500,5)
+nested_mean_500_5 <- colMeans(nested_result_500_5)
+nested_mean_500_5
+nested_sd_500_5 <- apply(nested_result_500_5, 2, sd)
+nested_sd_500_5
+
+#(v : compare)
+nested_compare_5_df <- rbind(true_values,nested_mean_500_5[1:3])
+nested_compare_5_df$Type <- c("true", "nested_estimated with 5")
+nested_compare_5_df
+
+nested_compare_sd_5_df <- rbind(b_1_sd,nested_sd_500_5[1:3])
+nested_compare_sd_5_df$Type <- c("1-(b)", "2-(b) with 5")
+nested_compare_sd_5_df
