@@ -1,0 +1,163 @@
+##########################################################################################
+#Problem-1 
+
+set.seed(2024)  # 재현성을 위한 시드 설정
+#(1)
+generate_data <- function(n) {
+  Sigma <- matrix(c(1,0.75,0.75,1),nrow=2)
+  Z <- mvrnorm(n, mu = c(0, 0), Sigma = Sigma)
+  Z1 <- Z[, 1]
+  Z2 <- Z[, 2]
+  W1 <- rnorm(n, mean = 0, sd = 1)
+  W2 <- rbinom(n, size = 1, prob = 0.5)
+  u <- runif(n)
+  beta1 <- log(2)
+  beta2 <- log(2)
+  beta3 <- -1
+  rho <- 0.5
+  gamma <- 1.5
+  T <- ((-log(1 - u) / (exp(beta1 * Z1 + beta2 * W1 + beta3 * W2) * rho))^(1 / gamma))
+  data <- data.frame(T=T, Z1 = Z1, Z2 = Z2, W1 = W1, W2 = W2)
+  return(data)
+}
+
+#(5)
+set.seed(2024)
+data <- generate_data(30000)
+cox_model <- coxph(Surv(T) ~ Z1 + W1 + W2, data = data)
+summary(cox_model)
+
+#(b)
+estimated_beta1 <- numeric(100)
+estimated_beta2 <- numeric(100)
+estimated_beta3 <- numeric(100)
+se_beta1 <- numeric(100)
+se_beta2 <- numeric(100)
+se_beta3 <- numeric(100)
+
+ # 재현성을 위해 시드를 한 번만 설정
+for (i in 1:100) {
+  # 이 반복문 내에서 매번 다른 난수가 생성됨
+  set.seed(i)
+  data <- generate_data(30000)
+  cox_model <- coxph(Surv(T) ~ Z1 + W1 + W2, data = data)
+  summary_model <- summary(cox_model)
+  estimated_beta1[i] <- summary_model$coefficients[1, 1]  
+  estimated_beta2[i] <- summary_model$coefficients[2, 1] 
+  estimated_beta3[i] <- summary_model$coefficients[3, 1]  
+  
+  se_beta1[i] <- summary_model$coefficients[1, 3]  
+  se_beta2[i] <- summary_model$coefficients[2, 3]  
+  se_beta3[i] <- summary_model$coefficients[3, 3]  
+  }
+
+mean_beta1 <- mean(estimated_beta1)
+mean_beta2 <- mean(estimated_beta2)
+mean_beta3 <- mean(estimated_beta3)
+
+# 각 베타값의 표준 편차 계산
+sd_beta1 <- sd(estimated_beta1)
+sd_beta2 <- sd(estimated_beta2)
+sd_beta3 <- sd(estimated_beta3)
+
+# 표준 오차의 평균 계산
+mean_se_beta1 <- mean(se_beta1)
+mean_se_beta2 <- mean(se_beta2)
+mean_se_beta3 <- mean(se_beta3)
+
+# 결과 출력
+cat("Sample mean of β1 estimates: ", mean_beta1, "\n")
+cat("Sample mean of β2 estimates: ", mean_beta2, "\n")
+cat("Sample mean of β3 estimates: ", mean_beta3, "\n\n")
+
+cat("Sample standard deviation of β1 estimates: ", sd_beta1, "\n")
+cat("Sample standard deviation of β2 estimates: ", sd_beta2, "\n")
+cat("Sample standard deviation of β3 estimates: ", sd_beta3, "\n\n")
+
+cat("Sample mean of standard errors for β1: ", mean_se_beta1, "\n")
+cat("Sample mean of standard errors for β2: ", mean_se_beta2, "\n")
+cat("Sample mean of standard errors for β3: ", mean_se_beta3, "\n")
+
+
+
+#(c)
+
+set.seed(2024)
+find_censoring_rate <- function(target_rate) {
+  censor_rate = optimize(function(lambda_C) {
+    n_large = 1000000
+    C_large <- rexp(n_large, rate = lambda_C)
+    T_large <- generate_data(n_large)$T  # 사건 발생 시간 생성
+    censoring_rate <- mean(T_large > C_large)
+    abs(censoring_rate - target_rate)
+  }, interval = c(0.001, 30))$minimum
+  
+  return(censor_rate)
+}
+
+target_rates = c(0.10, 0.30, 0.90, 0.95, 0.99)
+(lambda_C_values = sapply(target_rates, find_censoring_rate))
+
+
+##########################################################################################
+#(d)
+set.seed(2024)
+generate_data_censor <- function(num, lambda_c){
+  data <- generate_data(num)
+  C <- rexp(num, rate = lambda_c)
+  X <- pmin(data$T,C)
+  delta <- ifelse(data$T<=C,1,0)
+  censoring_rate <- mean(delta == 0)
+  data <- data.frame(X = X, delta = delta, Z1 = data$Z1, W1 = data$W1, W2 = data$W2)
+  return(data)
+}
+
+
+repeat_function <- function(lambda_c){
+  estimated_beta1 <- numeric(100)
+  estimated_beta2 <- numeric(100)
+  estimated_beta3 <- numeric(100)
+  se_beta1 <- numeric(100)
+  se_beta2 <- numeric(100)
+  se_beta3 <- numeric(100)
+  for (i in 1:100){
+    set.seed(i)
+    data <- generate_data_censor(30000, lambda_c)
+    cox_model <- coxph(Surv(X, delta) ~ Z1 + W1 + W2, data = data)
+    summary_model <- summary(cox_model)
+    
+    estimated_beta1[i] <- summary_model$coefficients[1, 1]
+    estimated_beta2[i] <- summary_model$coefficients[2, 1]
+    estimated_beta3[i] <- summary_model$coefficients[3, 1]
+    se_beta1[i] <- summary_model$coefficients[1, 3]
+    se_beta2[i] <- summary_model$coefficients[2, 3]
+    se_beta3[i] <- summary_model$coefficients[3, 3]
+  }
+  results <- data.frame(
+    beta1 = estimated_beta1,
+    beta2 = estimated_beta2,
+    beta3 = estimated_beta3,
+    se_beta1 = se_beta1,
+    se_beta2 = se_beta2,
+    se_beta3 = se_beta3)
+  return(results)
+  }
+
+mean_values_10 <- (repeat_function(lambda_C_values[1]))
+mean_values_30 <- (repeat_function(lambda_C_values[2]))
+mean_values_90 <- (repeat_function(lambda_C_values[3]))
+mean_values_95 <- (repeat_function(lambda_C_values[4]))
+mean_values_99 <- (repeat_function(lambda_C_values[5]))
+
+
+df_list <- list(mean_values_10, mean_values_30, mean_values_90, mean_values_95, mean_values_99) 
+summary_list <- lapply(df_list, function(df) {
+  mean_values <- colMeans(df)
+  sd_values <- sapply(df[, c("beta1", "beta2", "beta3")], sd)
+  c(mean_values, sd_beta1 = sd_values["beta1"], sd_beta2 = sd_values["beta2"], sd_beta3 = sd_values["beta3"])
+})
+mean_results <- do.call(rbind, summary_list)
+final_results <- cbind(`censoring rate` = c(10, 30, 90, 95, 99), mean_results)
+colnames(final_results) <- c("censoring rate",'mean_bata1','mean_beta2','mean_beta3',
+                             'se_beta1','se_beta2','se_beta3','sd_beta1','sd_beta2','sd_beta3')
+print(final_results)
